@@ -4,7 +4,13 @@ import IORedis from "ioredis";
 
 let scrapeQueue: Queue;
 
-export const redisConnection = new IORedis(process.env.REDIS_URL, {
+export const redisConnection = new IORedis({
+  host: process.env.REDIS_DOMAIN,
+  password: process.env.REDIS_PASSWORD,
+  port: 6379,
+  username: "default",
+  family: 6,
+  db: 0,
   maxRetriesPerRequest: null,
 });
 
@@ -41,7 +47,6 @@ export function getScrapeQueue() {
   }
   return scrapeQueue;
 }
-
 
 // === REMOVED IN FAVOR OF POLLING -- NOT RELIABLE
 // import { QueueEvents } from 'bullmq';

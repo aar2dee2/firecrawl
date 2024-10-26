@@ -17,7 +17,14 @@ export async function redisHealthController(req: Request, res: Response) {
   };
 
   try {
-    const queueRedis = new Redis(process.env.REDIS_URL);
+    const queueRedis = new Redis({
+      host: process.env.REDIS_DOMAIN,
+      password: process.env.REDIS_PASSWORD,
+      port: 6379,
+      username: "default",
+      family: 6,
+      db: 0,
+    });
 
     const testKey = "test";
     const testValue = "test";

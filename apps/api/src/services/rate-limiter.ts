@@ -42,7 +42,7 @@ const RATE_LIMITS = {
     growth: 500,
     growthdouble: 500,
   },
-  map:{
+  map: {
     default: 20,
     free: 5,
     starter: 50,
@@ -73,9 +73,14 @@ const RATE_LIMITS = {
   },
 };
 
-export const redisRateLimitClient = new Redis(
-  process.env.REDIS_RATE_LIMIT_URL
-)
+export const redisRateLimitClient = new Redis({
+  host: process.env.REDIS_DOMAIN,
+  password: process.env.REDIS_PASSWORD,
+  port: 6379,
+  username: "default",
+  family: 6,
+  db: 0,
+});
 
 const createRateLimiter = (keyPrefix, points) =>
   new RateLimiterRedis({
@@ -110,7 +115,6 @@ export const manualRateLimiter = new RateLimiterRedis({
   points: 2000,
   duration: 60, // Duration in seconds
 });
-
 
 export const scrapeStatusRateLimiter = new RateLimiterRedis({
   storeClient: redisRateLimitClient,
@@ -147,12 +151,12 @@ export function getRateLimiterPoints(
   token?: string,
   plan?: string,
   teamId?: string
-) : number {
+): number {
   const rateLimitConfig = RATE_LIMITS[mode]; // {default : 5}
 
   if (!rateLimitConfig) return RATE_LIMITS.account.default;
-  
-  const points : number =
+
+  const points: number =
     rateLimitConfig[makePlanKey(plan)] || rateLimitConfig.default; // 5
   return points;
 }
@@ -162,18 +166,21 @@ export function getRateLimiter(
   token?: string,
   plan?: string,
   teamId?: string
- ) : RateLimiterRedis {
-  if (token && testSuiteTokens.some(testToken => token.includes(testToken))) {
+): RateLimiterRedis {
+  if (token && testSuiteTokens.some((testToken) => token.includes(testToken))) {
     return testSuiteRateLimiter;
   }
 
-  if(teamId && teamId === process.env.DEV_B_TEAM_ID) {
+  if (teamId && teamId === process.env.DEV_B_TEAM_ID) {
     return devBRateLimiter;
   }
 
-  if(teamId && manual.includes(teamId)) {
+  if (teamId && manual.includes(teamId)) {
     return manualRateLimiter;
   }
-  
-  return createRateLimiter(`${mode}-${makePlanKey(plan)}`, getRateLimiterPoints(mode, token, plan, teamId));
+
+  return createRateLimiter(
+    `${mode}-${makePlanKey(plan)}`,
+    getRateLimiterPoints(mode, token, plan, teamId)
+  );
 }

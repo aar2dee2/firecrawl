@@ -22,7 +22,14 @@ import { Logger } from "../../lib/logger";
 import Redis from "ioredis";
 
 configDotenv();
-const redis = new Redis(process.env.REDIS_URL);
+const redis = new Redis({
+  host: process.env.REDIS_DOMAIN,
+  password: process.env.REDIS_PASSWORD,
+  port: 6379,
+  username: "default",
+  family: 6,
+  db: 0,
+});
 
 // Max Links that /map can return
 const MAX_MAP_LIMIT = 5000;
@@ -60,7 +67,9 @@ export async function mapController(
     : `site:${req.body.url}`;
 
   const resultsPerPage = 100;
-  const maxPages = Math.ceil(Math.min(MAX_FIRE_ENGINE_RESULTS, limit) / resultsPerPage);
+  const maxPages = Math.ceil(
+    Math.min(MAX_FIRE_ENGINE_RESULTS, limit) / resultsPerPage
+  );
 
   const cacheKey = `fireEngineMap:${mapUrl}`;
   const cachedResult = null;

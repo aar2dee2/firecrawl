@@ -31,7 +31,6 @@ Self-hosting Firecrawl is ideal for those who need full control over their scrap
 
 - Docker [instructions](https://docs.docker.com/get-docker/)
 
-
 2. Set environment variables
 
 Create an `.env` in the root directory you can copy over the template in `apps/api/.env.example`
@@ -39,6 +38,7 @@ Create an `.env` in the root directory you can copy over the template in `apps/a
 To start, we won't set up authentication or any optional subservices (pdf parsing, JS blocking support, AI features)
 
 `.env:`
+
 ```
 # ===== Required ENVS ======
 NUM_WORKERS_PER_QUEUE=8
@@ -70,28 +70,30 @@ POSTHOG_API_KEY= # set if you'd like to send posthog events like job logs
 POSTHOG_HOST= # set if you'd like to send posthog events like job logs
 ```
 
-3.  *(Optional) Running with TypeScript Playwright Service*
-    
-    *   Update the `docker-compose.yml` file to change the Playwright service:
-        
-        ```plaintext
-            build: apps/playwright-service
-        ```
-        TO
-        ```plaintext
-            build: apps/playwright-service-ts
-        ```
-        
-    *   Set the `PLAYWRIGHT_MICROSERVICE_URL` in your `.env` file:
-        
-        ```plaintext
-        PLAYWRIGHT_MICROSERVICE_URL=http://localhost:3000/scrape
-        ```
-        
-    *   Don't forget to set the proxy server in your `.env` file as needed.
+3.  _(Optional) Running with TypeScript Playwright Service_
+
+    - Update the `docker-compose.yml` file to change the Playwright service:
+
+      ```plaintext
+          build: apps/playwright-service
+      ```
+
+      TO
+
+      ```plaintext
+          build: apps/playwright-service-ts
+      ```
+
+    - Set the `PLAYWRIGHT_MICROSERVICE_URL` in your `.env` file:
+
+      ```plaintext
+      PLAYWRIGHT_MICROSERVICE_URL=http://localhost:3000/scrape
+      ```
+
+    - Don't forget to set the proxy server in your `.env` file as needed.
 
 4.  Build and run the Docker containers:
-    
+
     ```bash
     docker compose build
     docker compose up
@@ -101,17 +103,133 @@ This will run a local instance of Firecrawl which can be accessed at `http://loc
 
 You should be able to see the Bull Queue Manager UI on `http://localhost:3002/admin/@/queues`.
 
-5. *(Optional)* Test the API
+5.  _(Optional)_ Deploy to [Fly.io](https://fly.io/)
+
+    - Install the [Fly CLI](https://fly.io/docs/reference/cli/)
+    - You will need to deploy 2 services `/apps/api` and `/apps/playwright-service-ts` as separate apps.
+    - Start by creating a Redis instance using [Fly](https://fly.io/docs/upstash/redis/). You will need to do this as an IPv6 address is needed to connect to Redis from Fly, but if you create the instance directly on Upstash, you will need the Pro plan to get a private addess.
+    - Setup a Proxy Server. [froxy](https://froxy.com/).
+    - Now deploy the `playwright-service-ts` app. Set `PORT = 3000` in the `fly.toml` file. Here's the fly config for reference (you must set `[[services.ports]]` or Fly will throw warnings like "is your app listening on port 3000?"):
+
+      ```toml
+        app = 'playwright-service'
+        primary_region = 'sin'
+        [build]
+        [env]
+        PORT = '3000'
+
+        [http_service]
+        internal_port = 3000
+        force_https = true
+        auto_stop_machines = 'stop'
+        auto_start_machines = true
+        min_machines_running = 0
+        processes = ['app']
+
+        [[services]]
+        protocol = ''
+        internal_port = 0
+
+        [[services.ports]]
+        port = 3000
+        handlers = ['http']
+        force_https = true
+
+        [[vm]]
+        memory = '1gb'
+        cpu_kind = 'shared'
+        cpus = 1
+      ```
+
+- Before deploying the `api` app, set the `PLAYWRIGHT_MICROSERVICE_URL` in the `.env` file to point to the `playwright-service-ts` app. Also, set the `REDIS_URL` and `REDIS_RATE_LIMIT_URL` in the `.env` file to point to the Redis instance you created earlier. You should use a [redis connection string starting with `rediss://`](https://github.com/redis/ioredis?tab=readme-ov-file#connect-to-redis) to connect to the TLS-enabled Redis instance.
+- You may want to set up an [`http_check`](https://fly.io/docs/reference/configuration/#the-checks-section) on the `playwright-service-ts` app to ensure that only your Firecrawl instance makes requests to it.
+- Deploy the `api` app. Here's the fly config for reference (you must set `[[services.ports]]` or Fly will throw warnings like "is your app listening on port 8080?"):
+
+  ```toml
+  primary_region = 'sin'
+  kill_signal = 'SIGINT'
+  kill_timeout = '30s'
+
+  [build]
+
+  [env]
+  HOST = '0.0.0.0'
+  PORT = '8080'
+
+  [processes]
+  app = 'node --max-old-space-size=8192 dist/src/index.js'
+  worker = 'node --max-old-space-size=8192 dist/src/services/queue-worker.js'
+
+  [http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'off'
+  auto_start_machines = true
+  min_machines_running = 2
+  processes = ['app']
+
+  [http_service.concurrency]
+  type = 'requests'
+  soft_limit = 200
+
+  [[http_service.checks]]
+  interval = '30s'
+  timeout = '15s'
+  grace_period = '20s'
+  method = 'GET'
+  path = '/'
+
+  [[services]]
+  protocol = 'tcp'
+  internal_port = 8080
+  processes = ['app']
+
+  [[services.ports]]
+  port = 8080
+  handlers = ['http']
+  force_https = true
+
+  [[services.ports]]
+  port = 443
+  handlers = ['tls', 'http']
+
+  [services.concurrency]
+  type = 'connections'
+  soft_limit = 200
+
+  [[vm]]
+  size = 'performance-1x'
+  processes = ['app']
+  ```
+
+  After deploying, set env variables using `fly secrets set`. The Redis connection string does not work with `ioredis`, for some reason. After many tries, I used the object format as describe in this Fly community thread.
+
+  ```ts
+  export const redis = new Redis({
+    host: process.env.REDIS_DOMAIN,
+    password: process.env.REDIS_PASSWORD,
+    port: 6379,
+    username: "default",
+    family: 6,
+    db: 0,
+  });
+  ```
+
+  If your redis instance has TLS enabled, you will also need to set the `tls` options in the `Redis` object.
+  For the REDIS_DOMAIN, you can get the ipv6 address of the redis instance by running `dig +short AAAA <redis instance host>`.
+  (IPv6 addresses are available only for the Redis instances created through Fly. For the ones created through Upstash, you will need the Pro plan to get a private address.)
+
+6. _(Optional)_ Test the API
 
 If you’d like to test the crawl endpoint, you can run this:
 
-  ```bash
-  curl -X POST http://localhost:3002/v1/crawl \
-      -H 'Content-Type: application/json' \
-      -d '{
-        "url": "https://mendable.ai"
-      }'
-  ```   
+```bash
+curl -X POST http://localhost:3002/v1/crawl \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "url": "https://mendable.ai"
+  }'
+```
 
 ## Troubleshooting
 
@@ -120,6 +238,7 @@ This section provides solutions to common issues you might encounter while setti
 ### Supabase client is not configured
 
 **Symptom:**
+
 ```bash
 [YYYY-MM-DDTHH:MM:SS.SSSz]ERROR - Attempted to access Supabase client when it's not configured.
 [YYYY-MM-DDTHH:MM:SS.SSSz]ERROR - Error inserting scrape event: Error: Supabase client is not configured.
@@ -131,6 +250,7 @@ This error occurs because the Supabase client setup is not completed. You should
 ### You're bypassing authentication
 
 **Symptom:**
+
 ```bash
 [YYYY-MM-DDTHH:MM:SS.SSSz]WARN - You're bypassing authentication
 ```
@@ -145,6 +265,7 @@ Docker containers exit unexpectedly or fail to start.
 
 **Solution:**
 Check the Docker logs for any error messages using the command:
+
 ```bash
 docker logs [container_name]
 ```
@@ -158,6 +279,7 @@ docker logs [container_name]
 Errors related to connecting to Redis, such as timeouts or "Connection refused".
 
 **Solution:**
+
 - Ensure that the Redis service is up and running in your Docker environment.
 - Verify that the REDIS_URL and REDIS_RATE_LIMIT_URL in your .env file point to the correct Redis instance, ensure that it points to the same URL in the `docker-compose.yaml` file (`redis://redis:6379`)
 - Check network settings and firewall rules that may block the connection to the Redis port.
@@ -168,6 +290,7 @@ Errors related to connecting to Redis, such as timeouts or "Connection refused".
 API requests to the Firecrawl instance timeout or return no response.
 
 **Solution:**
+
 - Ensure that the Firecrawl service is running by checking the Docker container status.
 - Verify that the PORT and HOST settings in your .env file are correct and that no other service is using the same port.
 - Check the network configuration to ensure that the host is accessible from the client making the API request.

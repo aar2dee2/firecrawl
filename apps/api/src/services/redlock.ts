@@ -4,7 +4,16 @@ import Client from "ioredis";
 export const redlock = new Redlock(
   // You should have one client for each independent redis node
   // or cluster.
-  [new Client(process.env.REDIS_RATE_LIMIT_URL)],
+  [
+    new Client({
+      host: process.env.REDIS_DOMAIN,
+      password: process.env.REDIS_PASSWORD,
+      port: 6379,
+      username: "default",
+      family: 6,
+      db: 0,
+    }),
+  ],
   {
     // The expected clock drift; for more details see:
     // http://redis.io/topics/distlock
